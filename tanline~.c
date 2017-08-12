@@ -1,246 +1,146 @@
-/* Copyright (c) 2017 Kevin Nelson
- * Based on line~, which is Copyright (c) 1997-1999 Miller Puckette.
- * For information on usage and redistribution, and for a DISCLAIMER OF ALL
- * WARRANTIES, see the file, "LICENSE.txt," in this distribution.  */
+/* Copyright (c) 2017 Kevin Nelson */
 
 #include "m_pd.h"  
 #include "math.h"
 
-/* -------------------------- line~ ------------------------------ */
-static t_class *expline_tilde_class;
+/* -------------------------- tanline~ ------------------------------ */
+/* modeled after the binops: if no argument is given, there are two signal
+ * inlets for vector/vector operation; otherwise, vector scalar and the
+ * second inlet takes a float value.
+ *
+ * vector/vector in this case means that the amount can modulate at 
+ * signal rate
+ */
+static t_class *tanline_class, *scalar_tanline_class;
 
-typedef struct _expline
+typedef struct _tanline
 {
     t_object x_obj;
-    t_sample x_target; /* output target value of ramp */
-    t_sample x_value; /* current output value of ramp at block-borders */
+    t_float x_sig_dummy;
+} t_tanline;
 
-    double x_scale_value; /* current value of 0-1 ramp at block-borders */
-    double x_overshoot_target;
-    double x_overshoot_ratio;
-    double x_attack_coef;
-
-    t_float c_last_samplerate;
-    t_float c_last_dspticksize;
-    t_float x_dspticktomsec;
-    t_float x_samplespermsec;
-    int x_needs_overshoot_recalc;
-
-    t_sample x_valoffset;
-    t_sample x_valmult;
-
-    t_float x_inlet_ramptime;
-    t_float x_inlet_ramptime_was;
-    t_float x_inlet_overshoot;
-    t_float x_inlet_overshoot_was;
-    int x_ticksleft;
-    int x_retarget;
-} t_expline;
-
-/* M_E is `e`.. and a double */
-
-static void recalc_attack(t_expline *x)
+typedef struct _scalar_tanline
 {
-    post("re-calculating attack");
-    post("sample rate old: %f new: %f", x->c_last_samplerate, x->x_samplespermsec);
-    post("dsptick old: %f new: %f", x->c_last_dspticksize, x->x_dspticktomsec);
-    double attack_samples = x->x_samplespermsec * x->x_inlet_ramptime_was;
-    x->x_attack_coef = 1.0 - exp(log(x->x_overshoot_ratio) / attack_samples);
-    post("attack samples: %f", attack_samples);
-    post("attack coef: %f", x->x_attack_coef);
-    x->x_needs_overshoot_recalc = 0;
-}
+    t_object x_obj;
+    t_float x_sig_dummy;
 
-static t_int *expline_tilde_perform(t_int *w)
-{
-    t_expline *x = (t_expline *)(w[1]);
-    t_sample *out = (t_sample *)(w[2]);
-    int n = (int)(w[3]);
-    t_sample f = x->x_value;
-    double sv = x->x_scale_value;
-
-    if (PD_BIGORSMALL(f))
-            x->x_value = f = 0;
-    if (x->x_retarget)
-    {
-        int nticks = x->x_inlet_ramptime_was * x->x_dspticktomsec;
-        if (!nticks) nticks = 1;
-        x->x_ticksleft = nticks;
-        recalc_attack(x);
-        x->x_retarget = 0;
-    }
-    if (x->x_ticksleft)
-    {
-        if (x->x_needs_overshoot_recalc == 1 ||
-                (x->c_last_samplerate != x->x_samplespermsec) ||
-                (x->c_last_dspticksize != x->x_dspticktomsec)) {
-            recalc_attack(x);
-        }
-        t_sample g = x->x_value;
-        while (n--) {
-            *out++ = g;
-            sv += x->x_attack_coef * (x->x_overshoot_target - sv);
-            if (sv > 1.0) sv = 1.0;
-            g = x->x_valoffset + (x->x_valmult * sv);
-        }
-        x->x_value = g;
-        x->x_scale_value = sv;
-        x->x_ticksleft--;
-    }
-    else
-    {
-        t_sample g = x->x_value = x->x_target;
-        while (n--)
-            *out++ = g;
-    }
-
-    /* Cache the dsp block size / sample rate to determine if we need
-     * to recalculate the attack coeffient
+    /* amount of tanh to apply, user param must be between 0 and 1,
+     * internally hard-clipped to [0.05, 1] and then doubled
      */
-    x->c_last_samplerate = x->x_samplespermsec;
-    x->c_last_dspticksize = x->x_dspticktomsec;
-    return (w+4);
+    t_float x_tan_amount;
+} t_scalar_tanline;
+
+static void *tanline_new(t_symbol *s, int argc, t_atom *argv)
+{
+    if (argc > 1) post("tanline~: extra arguments ignored");
+    if (argc) {
+        t_scalar_tanline *x = (t_scalar_tanline *)pd_new(scalar_tanline_class);
+        floatinlet_new(&x->x_obj, &x->x_tan_amount);
+        x->x_tan_amount = atom_getfloatarg(0, argc, argv);
+        outlet_new(&x->x_obj, &s_signal);
+        x->x_sig_dummy = 0;
+        return (x);
+    } else {
+        t_tanline *x = (t_tanline *)pd_new(tanline_class);
+        inlet_new(&x->x_obj, &x->x_obj.ob_pd, &s_signal, &s_signal);
+        outlet_new(&x->x_obj, &s_signal);
+        x->x_sig_dummy = 0;
+        return (x);
+    }
 }
 
-/* TB: vectorized version */
-static t_int *expline_tilde_perf8(t_int *w)
-{
-    t_expline *x = (t_expline *)(w[1]);
-    t_sample *out = (t_sample *)(w[2]);
-    int n = (int)(w[3]);
-    t_sample f = x->x_value;
-    double sv = x->x_scale_value;
+static inline t_sample apply_tanh(t_sample sig, t_float amt) {
+    float ebx = pow(M_E, (amt * sig);
+    float numer = 2 * ebx - 2;
+    float denom = amt * ebx + amt;
+    return (numer / denom);
+}
 
-    if (PD_BIGORSMALL(f))
-        x->x_value = f = 0;
-    if (x->x_retarget)
-    {
-        int nticks = x->x_inlet_ramptime_was * x->x_dspticktomsec;
-        if (!nticks) nticks = 1;
-        x->x_ticksleft = nticks;
-        recalc_attack(x);
-        x->x_retarget = 0;
+static t_int *tanline_perform(t_int *w)
+{
+    t_sample *sig_in = (t_sample *)(w[1]);
+    t_sample *amt_in = (t_sample *)(w[2]);
+    t_sample *out = (t_sample *)(w[3]);
+    int n = (int)(w[4]);
+    while (n--) *out++ = apply_tanh(*sig_in++, *amt_in++);
+    return (w+5);
+}
+
+static t_int *tanline_perf8(t_int *w)
+{
+    t_sample *sig_in = (t_sample *)(w[1]);
+    t_sample *amt_in = (t_sample *)(w[2]);
+    t_sample *out = (t_sample *)(w[3]);
+    int n = (int)(w[4]);
+    for (; n; n -= 8, in += 8, in2 += 8, out += 8) {
+        t_sample s0 = sig_in[0], s1 = sig_in[1], s2 = sig_in[2], s3 = sig_in[3];
+        t_sample s4 = sig_in[4], s5 = sig_in[5], s6 = sig_in[6], s7 = sig_in[7];
+
+        t_sample a0 = amt_in[0], a1 = amt_in[1], a2 = amt_in[2], a3 = amt_in[3];
+        t_sample a4 = amt_in[4], a5 = amt_in[5], a6 = amt_in[6], a7 = amt_in[7];
+
+        out[0] = apply_tanh(s0, a0); out[1] = apply_tanh(s1, a1); out[2] = apply_tanh(s2, a2); out[3] = apply_tanh(s3, a3);
+        out[4] = apply_tanh(s4, a4); out[5] = apply_tanh(s5, a5); out[6] = apply_tanh(s6, a6); out[7] = apply_tanh(s7, a7);
     }
-    if (x->x_ticksleft)
-    {
-        if (x->x_needs_overshoot_recalc == 1 ||
-                (x->c_last_samplerate != x->x_samplespermsec) ||
-                (x->c_last_dspticksize != x->x_dspticktomsec)) {
-            recalc_attack(x);
-        }
-        t_sample g = x->x_value;
-        while (n--) {
-            *out++ = g;
-            sv += x->x_attack_coef * (x->x_overshoot_target - sv);
-            if (sv > 1.0) sv = 1.0;
-            g = x->x_valoffset + (x->x_valmult * sv);
-        }
-        x->x_value = g;
-        x->x_scale_value = sv;
-        x->x_ticksleft--;
+    return (w+5);
+}
+
+static t_int *scalar_taline_perform(t_int *w)
+{
+    t_sample *sig_in = (t_sample *)(w[1]);
+    t_float amt = *(t_float *)(w[2]);
+    t_sample *out = (t_sample *)(w[3]);
+    int n = (int)(w[4]);
+    while (n--) *out++ = apply_tanh(*sig_in++, amt);
+    return (w+5);
+}
+
+static t_int *scalar_tanline_perf8(t_int *w)
+{
+    t_sample *sig_in = (t_sample *)(w[1]);
+    t_float amt = *(t_float *)(w[2]);
+    t_sample *out = (t_sample *)(w[3]);
+    int n = (int)(w[4]);
+    for (; n; n -= 8, in += 8, in2 += 8, out += 8) {
+        t_sample s0 = sig_in[0], s1 = sig_in[1], s2 = sig_in[2], s3 = sig_in[3];
+        t_sample s4 = sig_in[4], s5 = sig_in[5], s6 = sig_in[6], s7 = sig_in[7];
+
+        out[0] = apply_tanh(s0, amt); out[1] = apply_tanh(s1, amt); out[2] = apply_tanh(s2, amt); out[3] = apply_tanh(s3, amt);
+        out[4] = apply_tanh(s4, amt); out[5] = apply_tanh(s5, amt); out[6] = apply_tanh(s6, amt); out[7] = apply_tanh(s7, amt);
     }
+    return (w+5);
+}
+
+static void tanline_dsp(t_tanline *x, t_signal **sp)
+{
+    if (sp[0]->sn & 7)
+        dsp_add(tanline_perform, 4,
+                sp[0]->s_vec, sp[1]->s_vec, sp[2]->s_vec, sp[0]->s_n);
     else
-    {
-        t_sample g = x->x_value = x->x_target;
-        for (; n; n -= 8, out += 8)
-        {
-            out[0] = g; out[1] = g; out[2] = g; out[3] = g; 
-            out[4] = g; out[5] = g; out[6] = g; out[7] = g;
-        }
-    }
-
-    /* Cache the dsp block size / sample rate to determine if we need
-     * to recalculate the attack coeffient
-     */
-    x->c_last_samplerate = x->x_samplespermsec;
-    x->c_last_dspticksize = x->x_dspticktomsec;
-    return (w+4);
+        dsp_add(tanline_perf8, 4,
+                sp[0]->s_vec, sp[1]->s_vec, sp[2]->s_vec, sp[0]->s_n);
 }
 
-static void set_overshoot(t_expline *x, t_float overshoot)
+static void scalar_tanline_dsp(t_tanline *x, t_signal **sp)
 {
-    x->x_inlet_overshoot_was = overshoot;
-    x->x_overshoot_target = 1.0 + overshoot;
-    x->x_overshoot_ratio = overshoot / x->x_overshoot_target;
-    post("overshoot target: %f", x->x_overshoot_target);
-    x->x_needs_overshoot_recalc = 1;
-}
-
-static void expline_tilde_float(t_expline *x, t_float f)
-{
-    post("previous attack coef: %f", x->x_attack_coef);
-    if (x->x_inlet_overshoot != x->x_inlet_overshoot_was)
-    {
-        set_overshoot(x, x->x_inlet_overshoot);
-    }
-
-    if (x->x_inlet_ramptime <= 0)
-    {
-        /* handle the "set to this value now" case */
-        x->x_target = x->x_value = f;
-        x->x_ticksleft = x->x_retarget = x->x_scale_value = 0;
-    }
+    if (sp[0]->sn & 7)
+        dsp_add(scalar_tanline_perform, 4,
+                sp[0]->s_vec, sp[1]->s_vec, sp[2]->s_vec, sp[0]->s_n);
     else
-    {
-        /* ramp to a new target */
-        x->x_target = f;
-        x->x_valoffset = x->x_value;
-        x->x_valmult = f - x->x_value;
-        x->x_retarget = 1;
-        x->x_scale_value = 0.0;
-        x->x_inlet_ramptime_was = x->x_inlet_ramptime;
-        x->x_inlet_ramptime = 0;
-        post("ramp time: %f", x->x_inlet_ramptime_was);
-    }
+        dsp_add(scalar_tanline_perf8, 4,
+                sp[0]->s_vec, sp[1]->s_vec, sp[2]->s_vec, sp[0]->s_n);
 }
 
-static void expline_tilde_stop(t_expline *x)
+void tanline_tilde_setup(void)
 {
-    x->x_target = x->x_value;
-    x->x_ticksleft = x->x_retarget = x->x_scale_value = 0;
-}
+    tanline_class = class_new(gensym("tanline~"), (t_newmethod)tanline_new, 0,
+            sizeof(t_tanline), 0, A_GIMME, 0);
+    class_addmethod(tanline_class, (t_method)tanline_dsp, gensym("dsp"), A_CANT, 0);
+    CLASS_MAINSIGNALIN(tanline_class, t_tanline, x_sig_dummy);
 
-static void expline_tilde_dsp(t_expline *x, t_signal **sp)
-{
-    if(sp[0]->s_n&7)
-        dsp_add(expline_tilde_perform, 3, x, sp[0]->s_vec, sp[0]->s_n);
-    else
-        dsp_add(expline_tilde_perf8, 3, x, sp[0]->s_vec, sp[0]->s_n);
-
-    x->x_samplespermsec = sp[0]->s_sr / 1000;
-    x->x_dspticktomsec = x->x_samplespermsec / sp[0]->s_n;
-}
-
-static void *expline_tilde_new(t_symbol *s, int argc, t_atom *argv)
-{
-    t_expline *x = (t_expline *)pd_new(expline_tilde_class);
-    outlet_new(&x->x_obj, gensym("signal"));
-    floatinlet_new(&x->x_obj, &x->x_inlet_ramptime);
-    floatinlet_new(&x->x_obj, &x->x_inlet_overshoot);
-    x->x_ticksleft = x->x_retarget = 0;
-    x->x_scale_value = x->x_value = x->x_target = x->x_inlet_ramptime = x->x_inlet_ramptime_was = x->x_inlet_overshoot = x->x_inlet_overshoot_was = 0;
-
-    t_float overshoot = 0.1;
-
-    switch(argc) {
-        case 1:
-            overshoot = atom_getfloat(argv);
-            break;
-        default:
-            break;
-    }
-
-    set_overshoot(x, overshoot);
-    return (x);
-}
-
-void expline_tilde_setup(void)
-{
-    expline_tilde_class = class_new(gensym("expline~"), (t_newmethod)expline_tilde_new, 0,
-        sizeof(t_expline), CLASS_DEFAULT, A_GIMME, 0);
-    class_addfloat(expline_tilde_class, (t_method)expline_tilde_float);
-    class_addmethod(expline_tilde_class, (t_method)expline_tilde_dsp,
-        gensym("dsp"), A_CANT, 0);
-    class_addmethod(expline_tilde_class, (t_method)expline_tilde_stop,
-        gensym("stop"), 0);
+    scalar_tanline_class = class_new(gensym("tanline~"), 0, 0,
+            sizeof(t_scalar_tanline), 0, 0);
+    CLASS_MAINSIGNALIN(scalar_tanline_class, t_scalar_tanline, x_sig_dummy);
+    class_addmethod(scalar_tanline_class, (t_method)scalar_tanline_dsp,
+            gensym("dsp"), A_CANT, 0);
 }
