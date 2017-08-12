@@ -1,6 +1,8 @@
-# `expline` - exponential line generator
+# `tanline` - Careful out there in the sun.
 
-It's like `[line~]`, but exponential.
+A clipping function that interpolates between `tanh` and hard clipping.
+
+Concept by @wrl, math by @rknLA.
 
 The rest of this info comes from the [`helloworld`](https://github.com/pure-data/helloworld) example, and is left here so I don't forget how to build it in two years.
 
