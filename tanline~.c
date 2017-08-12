@@ -24,9 +24,7 @@ typedef struct _scalar_tanline
     t_object x_obj;
     t_float x_sig_dummy;
 
-    /* amount of tanh to apply, user param must be between 0 and 1,
-     * internally hard-clipped to [0.05, 1] and then doubled
-     */
+    /* amount of tanh to apply, user param should be between 0.1 and 2.0 */
     t_float x_tan_amount;
 } t_scalar_tanline;
 
@@ -121,14 +119,14 @@ static void tanline_dsp(t_tanline *x, t_signal **sp)
                 sp[0]->s_vec, sp[1]->s_vec, sp[2]->s_vec, sp[0]->s_n);
 }
 
-static void scalar_tanline_dsp(t_tanline *x, t_signal **sp)
+static void scalar_tanline_dsp(t_scalar_tanline *x, t_signal **sp)
 {
     if (sp[0]->s_n & 7)
         dsp_add(scalar_tanline_perform, 4,
-                sp[0]->s_vec, sp[1]->s_vec, sp[2]->s_vec, sp[0]->s_n);
+                sp[0]->s_vec, &x->x_tan_amount, sp[2]->s_vec, sp[0]->s_n);
     else
         dsp_add(scalar_tanline_perf8, 4,
-                sp[0]->s_vec, sp[1]->s_vec, sp[2]->s_vec, sp[0]->s_n);
+                sp[0]->s_vec, &x->x_tan_amount, sp[2]->s_vec, sp[0]->s_n);
 }
 
 void tanline_tilde_setup(void)
