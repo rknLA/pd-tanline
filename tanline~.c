@@ -50,7 +50,7 @@ static void *tanline_new(t_symbol *s, int argc, t_atom *argv)
 }
 
 static inline t_sample apply_tanh(t_sample sig, t_float amt) {
-    float ebx = pow(M_E, (amt * sig);
+    float ebx = pow(M_E, (amt * sig));
     float numer = 2 * ebx - 2;
     float denom = amt * ebx + amt;
     return (numer / denom);
@@ -72,7 +72,7 @@ static t_int *tanline_perf8(t_int *w)
     t_sample *amt_in = (t_sample *)(w[2]);
     t_sample *out = (t_sample *)(w[3]);
     int n = (int)(w[4]);
-    for (; n; n -= 8, in += 8, in2 += 8, out += 8) {
+    for (; n; n -= 8, sig_in += 8, amt_in += 8, out += 8) {
         t_sample s0 = sig_in[0], s1 = sig_in[1], s2 = sig_in[2], s3 = sig_in[3];
         t_sample s4 = sig_in[4], s5 = sig_in[5], s6 = sig_in[6], s7 = sig_in[7];
 
@@ -85,7 +85,7 @@ static t_int *tanline_perf8(t_int *w)
     return (w+5);
 }
 
-static t_int *scalar_taline_perform(t_int *w)
+static t_int *scalar_tanline_perform(t_int *w)
 {
     t_sample *sig_in = (t_sample *)(w[1]);
     t_float amt = *(t_float *)(w[2]);
@@ -101,7 +101,7 @@ static t_int *scalar_tanline_perf8(t_int *w)
     t_float amt = *(t_float *)(w[2]);
     t_sample *out = (t_sample *)(w[3]);
     int n = (int)(w[4]);
-    for (; n; n -= 8, in += 8, in2 += 8, out += 8) {
+    for (; n; n -= 8, sig_in += 8, out += 8) {
         t_sample s0 = sig_in[0], s1 = sig_in[1], s2 = sig_in[2], s3 = sig_in[3];
         t_sample s4 = sig_in[4], s5 = sig_in[5], s6 = sig_in[6], s7 = sig_in[7];
 
@@ -113,7 +113,7 @@ static t_int *scalar_tanline_perf8(t_int *w)
 
 static void tanline_dsp(t_tanline *x, t_signal **sp)
 {
-    if (sp[0]->sn & 7)
+    if (sp[0]->s_n & 7)
         dsp_add(tanline_perform, 4,
                 sp[0]->s_vec, sp[1]->s_vec, sp[2]->s_vec, sp[0]->s_n);
     else
@@ -123,7 +123,7 @@ static void tanline_dsp(t_tanline *x, t_signal **sp)
 
 static void scalar_tanline_dsp(t_tanline *x, t_signal **sp)
 {
-    if (sp[0]->sn & 7)
+    if (sp[0]->s_n & 7)
         dsp_add(scalar_tanline_perform, 4,
                 sp[0]->s_vec, sp[1]->s_vec, sp[2]->s_vec, sp[0]->s_n);
     else
