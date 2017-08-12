@@ -4,6 +4,11 @@ A clipping function that interpolates between `tanh` and hard clipping.
 
 Concept by @wrl, math by @rknLA.
 
+Playing around with math: [https://www.desmos.com/calculator/m3odynytzu](https://www.desmos.com/calculator/m3odynytzu)
+
+
+---
+
 The rest of this info comes from the [`helloworld`](https://github.com/pure-data/helloworld) example, and is left here so I don't forget how to build it in two years.
 
 
