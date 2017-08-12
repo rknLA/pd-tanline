@@ -47,11 +47,16 @@ static void *tanline_new(t_symbol *s, int argc, t_atom *argv)
     }
 }
 
-static inline t_sample apply_tanh(t_sample sig, t_float amt) {
-    float ebx = pow(M_E, (amt * sig));
-    float numer = 2 * ebx - 2;
-    float denom = amt * ebx + amt;
-    return (numer / denom);
+static inline t_sample apply_tanh(t_sample sig, t_sample amt) {
+    float ebx, numer, denom, res;
+    if (amt <= 0)  amt = 0.10;
+    ebx = pow(M_E, (amt * sig));
+    numer = 2 * ebx - 2;
+    denom = amt * ebx + amt;
+    res = numer / denom;
+    if (res > 1.0)  res = 1.0;
+    if (res < -1.0)  res = -1.0;
+    return res;
 }
 
 static t_int *tanline_perform(t_int *w)
@@ -111,7 +116,7 @@ static t_int *scalar_tanline_perf8(t_int *w)
 
 static void tanline_dsp(t_tanline *x, t_signal **sp)
 {
-    if (sp[0]->s_n & 7)
+    if (sp[0]->s_n&7)
         dsp_add(tanline_perform, 4,
                 sp[0]->s_vec, sp[1]->s_vec, sp[2]->s_vec, sp[0]->s_n);
     else
@@ -121,12 +126,12 @@ static void tanline_dsp(t_tanline *x, t_signal **sp)
 
 static void scalar_tanline_dsp(t_scalar_tanline *x, t_signal **sp)
 {
-    if (sp[0]->s_n & 7)
+    if (sp[0]->s_n&7)
         dsp_add(scalar_tanline_perform, 4,
-                sp[0]->s_vec, &x->x_tan_amount, sp[2]->s_vec, sp[0]->s_n);
+                sp[0]->s_vec, &x->x_tan_amount, sp[1]->s_vec, sp[0]->s_n);
     else
         dsp_add(scalar_tanline_perf8, 4,
-                sp[0]->s_vec, &x->x_tan_amount, sp[2]->s_vec, sp[0]->s_n);
+                sp[0]->s_vec, &x->x_tan_amount, sp[1]->s_vec, sp[0]->s_n);
 }
 
 void tanline_tilde_setup(void)
